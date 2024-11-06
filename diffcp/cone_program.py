@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import warnings
 from multiprocessing.pool import ThreadPool
+import multiprocessing
 
 import ecos
 import clarabel
@@ -152,6 +153,7 @@ def solve_only_wrapper(A, b, c, cone_dict, warm_start, kwargs):
         A, b, c, cone_dict, warm_start=warm_start, **kwargs)
 
 
+pool = None
 def solve_only_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1,
                      warm_starts=None, **kwargs):
     """
@@ -188,13 +190,13 @@ def solve_only_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1,
             ys += [y]
             ss += [s]
     else:
-        # thread pool
-        pool = ThreadPool(processes=n_jobs_forward)
+        # use process pool instead of threadpool
+        global pool
+        if pool is None:
+            pool = multiprocessing.Pool(processes=n_jobs_forward)
         args = [(A, b, c, cone_dict, warm_start, kwargs) for A, b, c, cone_dict, warm_start in
                 zip(As, bs, cs, cone_dicts, warm_starts)]
-        with threadpool_limits(limits=1):
-            results = pool.starmap(solve_only_wrapper, args)
-        pool.close()
+        results = pool.starmap(solve_only_wrapper, args)
         xs = [r[0] for r in results]
         ys = [r[1] for r in results]
         ss = [r[2] for r in results]
