@@ -1,4 +1,4 @@
-import multiprocessing as mp
+import multiprocess as mp
 import warnings
 
 import numpy as np
@@ -6,6 +6,8 @@ import scipy.sparse as sparse
 
 import diffcp._diffcp as _diffcp
 import diffcp.cones as cone_lib
+
+import time
 
 
 def pi(z, cones):
@@ -84,7 +86,7 @@ def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs
         # thread pool
         global pool_for
         if pool_for is None:
-            pool_for = mp.pool(processes=n_jobs_forward)
+            pool_for = mp.Pool(n_jobs_forward)
         args = [(A, b, c, cone_dict, warm_start, mode, kwargs) for A, b, c, cone_dict, warm_start in
                 zip(As, bs, cs, cone_dicts, warm_starts)]
         results = pool_for.starmap(solve_and_derivative_wrapper, args)
@@ -94,6 +96,7 @@ def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs
         Ds = [r[3] for r in results]
         DTs = [r[4] for r in results]
 
+    
     if n_jobs_backward == 1:
         def D_batch(dAs, dbs, dcs, **kwargs):
             dxs, dys, dss = [], [], []
@@ -113,11 +116,11 @@ def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs
                 dcs += [dc]
             return dAs, dbs, dcs
     else:
-
         def D_batch(dAs, dbs, dcs, **kwargs):
             global pool_back
             if pool_back is None:
-                pool_back = mp.pool(processes=n_jobs_backward)
+                print("Initializing Pool")
+                pool_back = mp.Pool(n_jobs_backward)
 
             def Di(i):
                 return Ds[i % batch_size](dAs[i], dbs[i], dcs[i], **kwargs)
@@ -130,12 +133,12 @@ def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs
         def DT_batch(dxs, dys, dss, **kwargs):
             global pool_back
             if pool_back is None:
-                pool_back = mp.pool(processes=n_jobs_backward)
+                print("Initializing Pool")
+                pool_back = mp.Pool(n_jobs_backward)
 
             def DTi(i):
                 return DTs[i % batch_size](dxs[i], dys[i], dss[i], **kwargs)
             results = pool_back.map(DTi, range(len(dxs)))
-            pool.close()
             dAs = [r[0] for r in results]
             dbs = [r[1] for r in results]
             dcs = [r[2] for r in results]
@@ -542,7 +545,8 @@ def solve_and_derivative_internal(A, b, c, cone_dict, solve_method=None,
         [-np.expand_dims(c, -1).T, -np.expand_dims(b, -1).T, None]
     ])
 
-    D_proj_dual_cone = _diffcp.dprojection(v, cones_parsed, True)
+    #D_proj_dual_cone = _diffcp.dprojection(v, cones_parsed, True)
+    """
     if mode == "dense":
         Q_dense = Q.todense()
         M = _diffcp.M_dense(Q_dense, cones_parsed, u, v, w)
@@ -550,6 +554,7 @@ def solve_and_derivative_internal(A, b, c, cone_dict, solve_method=None,
     elif mode in ("lsqr", "lsmr"):
         M = _diffcp.M_operator(Q, cones_parsed, u, v, w)
         MT = M.transpose()
+    """
 
     pi_z = pi(z, cones)
 
@@ -573,13 +578,21 @@ def solve_and_derivative_internal(A, b, c, cone_dict, solve_method=None,
         if np.allclose(rhs, 0):
             dz = np.zeros(rhs.size)
         elif mode == "dense":
+            Q_dense = Q.todense()
+            M = _diffcp.M_dense(Q_dense, cones_parsed, u, v, w)
+            MT = M.T
             dz = _diffcp._solve_derivative_dense(M, MT, rhs)
         elif mode == "lsqr":
+            M = _diffcp.M_operator(Q, cones_parsed, u, v, w)
+            MT = M.transpose()
             dz = _diffcp.lsqr(M, rhs).solution
         elif mode == "lsmr":
+            M = _diffcp.M_operator(Q, cones_parsed, u, v, w)
+            MT = M.transpose()
             M_sp = sparse.linalg.LinearOperator(dQ.shape, matvec=M.matvec, rmatvec=M.rmatvec)
             dz, istop, itn, normr, normar, norma, conda, normx = sparse.linalg.lsmr(M_sp, rhs, maxiter=10*M_sp.shape[0], atol=1e-12, btol=1e-12)
 
+        D_proj_dual_cone = _diffcp.dprojection(v, cones_parsed, True)
         du, dv, dw = np.split(dz, [n, n + m])
         dx = du - x * dw
         dy = D_proj_dual_cone.matvec(dv) - y * dw
@@ -597,6 +610,8 @@ def solve_and_derivative_internal(A, b, c, cone_dict, solve_method=None,
             perturbations; the sparsity pattern of `dA` matches that of `A`.
         """
 
+        D_proj_dual_cone = _diffcp.dprojection(v, cones_parsed, True)
+
         dw = -(x @ dx + y @ dy + s @ ds)
         dz = np.concatenate(
             [dx, D_proj_dual_cone.rmatvec(dy + ds) - ds, np.array([dw])])
@@ -604,10 +619,17 @@ def solve_and_derivative_internal(A, b, c, cone_dict, solve_method=None,
         if np.allclose(dz, 0):
             r = np.zeros(dz.shape)
         elif mode == "dense":
+            Q_dense = Q.todense()
+            M = _diffcp.M_dense(Q_dense, cones_parsed, u, v, w)
+            MT = M.T
             r = _diffcp._solve_adjoint_derivative_dense(M, MT, dz)
         elif mode == "lsqr":
+            M = _diffcp.M_operator(Q, cones_parsed, u, v, w)
+            MT = M.transpose()
             r = _diffcp.lsqr(MT, dz).solution
         elif mode == "lsmr":
+            M = _diffcp.M_operator(Q, cones_parsed, u, v, w)
+            MT = M.transpose()
             MT_sp = sparse.linalg.LinearOperator(dz.shape*2, matvec=MT.matvec, rmatvec=MT.rmatvec)
             r, istop, itn, normr, normar, norma, conda, normx = sparse.linalg.lsmr(MT_sp, dz, maxiter=10*MT_sp.shape[0], atol=1e-10, btol=1e-10)
 

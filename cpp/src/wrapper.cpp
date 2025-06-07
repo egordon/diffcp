@@ -1,6 +1,9 @@
+#define PYBIND11_DETAILED_ERROR_MESSAGES
 #include <pybind11/eigen.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <iostream>
 
 #include "cones.h"
 #include "deriv.h"
@@ -15,19 +18,19 @@ PYBIND11_MODULE(_diffcp, m) {
   py::class_<LinearOperator>(m, "LinearOperator")
       .def("matvec", &LinearOperator::apply_matvec)
       .def("rmatvec", &LinearOperator::apply_rmatvec)
-      .def("transpose", &LinearOperator::transpose)
-      .def(py::pickle(
-          [](const LinearOperator& linop) { // dump
-              return py::make_tuple(linop.m, linop.n, linop.matvec, linop.rmatvec);
-          },
-          [](py::tuple t) { // load
-              return LinearOperator{t[0].cast<int>(), t[1].cast<int>(), t[2].cast<VecFn>(), t[3].cast<VecFn>()};
-          }
-      ));
+      .def("transpose", &LinearOperator::transpose);
   py::class_<Cone>(m, "Cone")
       .def(py::init<ConeType, const std::vector<int> &>())
       .def_readonly("type", &Cone::type)
-      .def_readonly("sizes", &Cone::sizes);
+      .def_readonly("sizes", &Cone::sizes)
+      .def(py::pickle(
+          [](const Cone& cone) { // dump
+              return py::make_tuple(cone.type, cone.sizes);
+          },
+          [](py::tuple t) { // load
+              return Cone{t[0].cast<ConeType>(), t[1].cast<std::vector<int>>()};
+          }
+      ));
   py::enum_<ConeType>(m, "ConeType")
       .value("ZERO", ConeType::ZERO)
       .value("POS", ConeType::POS)
