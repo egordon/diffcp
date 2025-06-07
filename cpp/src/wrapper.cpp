@@ -15,7 +15,15 @@ PYBIND11_MODULE(_diffcp, m) {
   py::class_<LinearOperator>(m, "LinearOperator")
       .def("matvec", &LinearOperator::apply_matvec)
       .def("rmatvec", &LinearOperator::apply_rmatvec)
-      .def("transpose", &LinearOperator::transpose);
+      .def("transpose", &LinearOperator::transpose)
+      .def(py::pickle(
+          [](const LinearOperator& linop) { // dump
+              return py::make_tuple(linop.m, linop.n, linop.matvec, linop.rmatvec);
+          },
+          [](py::tuple t) { // load
+              return LinearOperator{t[0].cast<int>(), t[1].cast<int>(), t[2].cast<VecFn>(), t[3].cast<VecFn>()};
+          }
+      ));
   py::class_<Cone>(m, "Cone")
       .def(py::init<ConeType, const std::vector<int> &>())
       .def_readonly("type", &Cone::type)
