@@ -1,10 +1,8 @@
 import multiprocessing as mp
 import warnings
-from multiprocessing.pool import ThreadPool
 
 import numpy as np
 import scipy.sparse as sparse
-from threadpoolctl import threadpool_limits
 
 import diffcp._diffcp as _diffcp
 import diffcp.cones as cone_lib
@@ -25,7 +23,8 @@ def solve_and_derivative_wrapper(A, b, c, cone_dict, warm_start, mode, kwargs):
     return solve_and_derivative(
         A, b, c, cone_dict, warm_start=warm_start, mode=mode, **kwargs)
 
-
+pool_back = None
+pool_for = None
 def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs_backward=-1,
                                mode="lsqr", warm_starts=None, **kwargs):
     """
@@ -83,12 +82,12 @@ def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs
             DTs += [DT]
     else:
         # thread pool
-        pool = ThreadPool(processes=n_jobs_forward)
+        global pool_for
+        if pool_for is None:
+            pool_for = mp.pool(processes=n_jobs_forward)
         args = [(A, b, c, cone_dict, warm_start, mode, kwargs) for A, b, c, cone_dict, warm_start in
                 zip(As, bs, cs, cone_dicts, warm_starts)]
-        with threadpool_limits(limits=1):
-            results = pool.starmap(solve_and_derivative_wrapper, args)
-        pool.close()
+        results = pool_for.starmap(solve_and_derivative_wrapper, args)
         xs = [r[0] for r in results]
         ys = [r[1] for r in results]
         ss = [r[2] for r in results]
@@ -98,8 +97,8 @@ def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs
     if n_jobs_backward == 1:
         def D_batch(dAs, dbs, dcs, **kwargs):
             dxs, dys, dss = [], [], []
-            for i in range(batch_size):
-                dx, dy, ds = Ds[i](dAs[i], dbs[i], dcs[i], **kwargs)
+            for i in range(len(dAs)):
+                dx, dy, ds = Ds[i % batch_size](dAs[i], dbs[i], dcs[i], **kwargs)
                 dxs += [dx]
                 dys += [dy]
                 dss += [ds]
@@ -107,8 +106,8 @@ def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs
 
         def DT_batch(dxs, dys, dss, **kwargs):
             dAs, dbs, dcs = [], [], []
-            for i in range(batch_size):
-                dA, db, dc = DTs[i](dxs[i], dys[i], dss[i], **kwargs)
+            for i in range(len(dxs)):
+                dA, db, dc = DTs[i % batch_size](dxs[i], dys[i], dss[i], **kwargs)
                 dAs += [dA]
                 dbs += [db]
                 dcs += [dc]
@@ -116,23 +115,26 @@ def solve_and_derivative_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1, n_jobs
     else:
 
         def D_batch(dAs, dbs, dcs, **kwargs):
-            pool = ThreadPool(processes=n_jobs_backward)
+            global pool_back
+            if pool_back is None:
+                pool_back = mp.pool(processes=n_jobs_backward)
 
             def Di(i):
-                return Ds[i](dAs[i], dbs[i], dcs[i], **kwargs)
-            results = pool.map(Di, range(batch_size))
-            pool.close()
+                return Ds[i % batch_size](dAs[i], dbs[i], dcs[i], **kwargs)
+            results = pool_back.map(Di, range(len(dAs)))
             dxs = [r[0] for r in results]
             dys = [r[1] for r in results]
             dss = [r[2] for r in results]
             return dxs, dys, dss
 
         def DT_batch(dxs, dys, dss, **kwargs):
-            pool = ThreadPool(processes=n_jobs_backward)
+            global pool_back
+            if pool_back is None:
+                pool_back = mp.pool(processes=n_jobs_backward)
 
             def DTi(i):
-                return DTs[i](dxs[i], dys[i], dss[i], **kwargs)
-            results = pool.map(DTi, range(batch_size))
+                return DTs[i % batch_size](dxs[i], dys[i], dss[i], **kwargs)
+            results = pool_back.map(DTi, range(len(dxs)))
             pool.close()
             dAs = [r[0] for r in results]
             dbs = [r[1] for r in results]
@@ -185,12 +187,12 @@ def solve_only_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1,
             ss += [s]
     else:
         # thread pool
-        pool = ThreadPool(processes=n_jobs_forward)
+        global pool_for
+        if pool_for is None:
+            pool_for = mp.pool(processes=n_jobs_forward)
         args = [(A, b, c, cone_dict, warm_start, kwargs) for A, b, c, cone_dict, warm_start in
                 zip(As, bs, cs, cone_dicts, warm_starts)]
-        with threadpool_limits(limits=1):
-            results = pool.starmap(solve_only_wrapper, args)
-        pool.close()
+        results = pool.starmap(solve_only_wrapper, args)
         xs = [r[0] for r in results]
         ys = [r[1] for r in results]
         ss = [r[2] for r in results]
