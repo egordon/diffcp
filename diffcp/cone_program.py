@@ -175,6 +175,9 @@ def solve_only_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1,
     gradient information is no longer desired, the limited functionality provided
     by `solve_only_batch` was wanted for computational efficiency.
     """
+    # Ignore backwards jobs
+    if "n_jobs_backward" in kwargs:
+        del kwargs["n_jobs_backward"]
     batch_size = len(As)
     if warm_starts is None:
         warm_starts = [None] * batch_size
