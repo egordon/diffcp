@@ -198,10 +198,10 @@ def solve_only_batch(As, bs, cs, cone_dicts, n_jobs_forward=-1,
         # thread pool
         global pool_for
         if pool_for is None:
-            pool_for = mp.pool(processes=n_jobs_forward)
+            pool_for = mp.Pool(n_jobs_forward)
         args = [(A, b, c, cone_dict, warm_start, kwargs) for A, b, c, cone_dict, warm_start in
                 zip(As, bs, cs, cone_dicts, warm_starts)]
-        results = pool.starmap(solve_only_wrapper, args)
+        results = pool_for.starmap(solve_only_wrapper, args)
         xs = [r[0] for r in results]
         ys = [r[1] for r in results]
         ss = [r[2] for r in results]
